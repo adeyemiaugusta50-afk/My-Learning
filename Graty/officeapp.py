@@ -1,5 +1,7 @@
 import json
 import logging
+import math
+import time
 import os
 import threading
 import uuid
@@ -63,6 +65,10 @@ PAGE = """<!doctype html>
     {% if show_form %}
       <form id="check-in-form" method="post" action="/">
         <input type="hidden" name="submission_id" value="{{ submission_id }}">
+        <input type="hidden" name="latitude" id="latitude">
+        <input type="hidden" name="longitude" id="longitude">
+        <input type="hidden" name="location_accuracy" id="location_accuracy">
+        <input type="hidden" name="location_timestamp" id="location_timestamp">
         <label for="full_name">Full name</label>
         <input id="full_name" name="full_name" type="text" required maxlength="200"
           autocomplete="name" value="{{ full_name }}" placeholder="Your full name">
@@ -74,17 +80,47 @@ PAGE = """<!doctype html>
     {% endif %}
     <aside class="notice">
       Your name and arrival time will be recorded in the office attendance sheet.
-      Scanning this QR code does not prove that you are physically at the office.
+      Allow location access when checking in. Your reported location must be within the office boundary.
+      Location is checked only for this submission and is not stored in the attendance sheet.
     </aside>
   </main>
   <script>
     const form = document.getElementById("check-in-form");
     if (form) {
-      form.addEventListener("submit", () => {
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
         const button = document.getElementById("check-in-button");
+        const message = document.getElementById("loading-message");
+        if (button.disabled) return;
         button.disabled = true;
-        button.textContent = "Saving…";
-        document.getElementById("loading-message").hidden = false;
+        button.textContent = "Checking location…";
+        message.hidden = false;
+        message.textContent = "Please allow location access to check in.";
+        const fail = (text) => {
+          message.textContent = text;
+          button.disabled = false;
+          button.textContent = "Check in";
+        };
+        if (!window.isSecureContext || !navigator.geolocation) {
+          fail("Location access requires a supported browser and HTTPS. Open the public app link in Safari or Chrome.");
+          return;
+        }
+        navigator.geolocation.getCurrentPosition((position) => {
+          document.getElementById("latitude").value = position.coords.latitude;
+          document.getElementById("longitude").value = position.coords.longitude;
+          document.getElementById("location_accuracy").value = position.coords.accuracy;
+          document.getElementById("location_timestamp").value = position.timestamp;
+          button.textContent = "Saving…";
+          message.textContent = "Checking your location and saving your check-in…";
+          HTMLFormElement.prototype.submit.call(form);
+        }, (error) => {
+          const errors = {
+            1: "Location permission was denied. Allow location for this site in your browser settings, then retry.",
+            2: "Your location is unavailable. Turn on location services and try near a window or outside.",
+            3: "Location took too long. Move near a window or outside and try again."
+          };
+          fail(errors[error.code] || "Unable to get your location. Please try again.");
+        }, {enableHighAccuracy: true, maximumAge: 0, timeout: 20000});
       });
     }
   </script>
@@ -258,6 +294,53 @@ class GoogleSheetsAttendanceStore:
             return date_text, time_text
 
 
+def verify_office_location(form: Any) -> tuple[str, int] | None:
+    """Check browser-reported location before any Sheets access; never persist it.
+
+    Coordinates are client supplied and can be spoofed. This is a proximity
+    check, not cryptographic proof of presence or identity.
+    """
+    try:
+        office_lat = float(os.environ.get("OFFICE_LATITUDE", "7.289250"))
+        office_lon = float(os.environ.get("OFFICE_LONGITUDE", "5.233694"))
+        radius = float(os.environ.get("OFFICE_RADIUS_METERS", "100"))
+        max_accuracy = float(os.environ.get("LOCATION_MAX_ACCURACY_METERS", "50"))
+        if not all(math.isfinite(v) for v in (office_lat, office_lon, radius, max_accuracy)):
+            raise ValueError
+        if not (-90 <= office_lat <= 90 and -180 <= office_lon <= 180
+                and radius > 0 and max_accuracy > 0):
+            raise ValueError
+    except (ValueError, TypeError):
+        return "The office location settings are invalid. Please contact the office.", 503
+    try:
+        lat = float(form.get("latitude", ""))
+        lon = float(form.get("longitude", ""))
+        accuracy = float(form.get("location_accuracy", ""))
+        timestamp = float(form.get("location_timestamp", "")) / 1000
+        if not all(math.isfinite(v) for v in (lat, lon, accuracy, timestamp)):
+            raise ValueError
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180 and accuracy > 0):
+            raise ValueError
+    except (ValueError, TypeError):
+        return "A valid phone location is required. Allow location access and try again.", 400
+    age = time.time() - timestamp
+    if age > 120 or age < -30:
+        return "Your location reading has expired or your phone clock is incorrect. Please retry.", 400
+    if accuracy > max_accuracy:
+        return "Your location is not accurate enough. Try near a window or outside, then check in again.", 400
+    phi1, phi2 = math.radians(office_lat), math.radians(lat)
+    dphi = phi2 - phi1
+    dlambda = math.radians(lon - office_lon)
+    h = math.sin(dphi / 2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda / 2)**2
+    distance = 6371000 * 2 * math.asin(math.sqrt(max(0, min(1, h))))
+    if distance > radius:
+        return f"Check-in is only available within {radius:g} metres of the office. Please retry at the office.", 403
+    # Do not expand the boundary to accommodate an uncertain reading.
+    if distance + accuracy > radius:
+        return "Your location is too close to the boundary to confirm. Move closer to the office centre and retry.", 400
+    return None
+
+
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_mapping(OFFICE_TIMEZONE="Africa/Lagos")
@@ -317,6 +400,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 message="This check-in form has expired. Please submit the refreshed form.",
                 success=False,
             ), 400
+
+        location_error = verify_office_location(request.form)
+        if location_error:
+            message, status = location_error
+            return render_page(submission_id=submission_id, full_name=full_name,
+                               message=message, success=False), status
 
         try:
             store = current_app.extensions.get("attendance_store")
