@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D Diamond Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #ui { position: fixed; left: 16px; bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { background: #ffffff18; color: #fff; border: 1px solid #ffffff40; border-radius: 8px; padding: 8px 14px; cursor: pointer; backdrop-filter: blur(6px); }
+  button:hover { background: #ffffff30; }
+  #hint { position: fixed; top: 14px; width: 100%; text-align: center; color: #ffffff99; font-size: 14px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="hint">Drag to rotate · scroll/pinch to zoom</div>
+<div id="ui">
+  <button id="spin">Auto-rotate: on</button>
+  <button id="edges">Show facet edges</button>
+  <button id="tint">Colour: clear</button>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.02).texture;
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(2.6, 1.8, 3.4);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.5;
+controls.minDistance = 2;
+controls.maxDistance = 9;
+
+// Brilliant-cut geometry: table, crown, girdle, pavilion, culet (8-fold symmetry)
+function diamondGeometry() {
+  const N = 8, step = (Math.PI * 2) / N;
+  const ring = (r, y, offset) => Array.from({ length: N }, (_, i) => {
+    const a = (i + offset) * step;
+    return new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r);
+  });
+  const T  = ring(0.58, 0.55, 0);      // table
+  const G  = ring(1.0,  0.0,  0.5);    // girdle top
+  const Gb = ring(1.0, -0.05, 0.5);    // girdle bottom
+  const P  = ring(0.5, -0.45, 0);      // lower pavilion ring
+  const culet = new THREE.Vector3(0, -1.0, 0);
+  const tris = [];
+  const tri = (a, b, c) => tris.push(a, b, c);
+  const next = i => (i + 1) % N, prev = i => (i + N - 1) % N;
+
+  // table (fan)
+  const top = new THREE.Vector3(0, 0.55, 0);
+  for (let i = 0; i < N; i++) tri(top, T[next(i)], T[i]);
+  // crown
+  for (let i = 0; i < N; i++) {
+    tri(T[i], T[next(i)], G[i]);        // star facets
+    tri(T[next(i)], G[next(i)], G[i]);  // bezel/kite facets
+  }
+  // girdle band
+  for (let i = 0; i < N; i++) {
+    tri(G[i], G[next(i)], Gb[next(i)]);
+    tri(G[i], Gb[next(i)], Gb[i]);
+  }
+  // pavilion
+  for (let i = 0; i < N; i++) {
+    tri(Gb[i], Gb[next(i)], P[next(i)]);
+    tri(Gb[prev(i)], Gb[i], P[i]);
+    tri(P[i], P[next(i)], Gb[i]);
+    tri(P[i], culet, P[next(i)]);
+  }
+  const g = new THREE.BufferGeometry().setFromPoints(tris);
+  g.computeVertexNormals();
+  return g;
+}
+
+const geometry = diamondGeometry();
+const material = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff, metalness: 0, roughness: 0,
+  transmission: 1, thickness: 1.6, ior: 2.4,
+  dispersion: 0.6, specularIntensity: 1, envMapIntensity: 2.2,
+  clearcoat: 1, flatShading: true, side: THREE.DoubleSide,
+  attenuationColor: new THREE.Color(0xffffff), attenuationDistance: 4,
+});
+const diamond = new THREE.Mesh(geometry, material);
+scene.add(diamond);
+
+const edgeLines = new THREE.LineSegments(
+  new THREE.EdgesGeometry(geometry, 1),
+  new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 })
+);
+edgeLines.visible = false;
+diamond.add(edgeLines);
+
+// moving lights for sparkle
+const l1 = new THREE.PointLight(0xffffff, 40); scene.add(l1);
+const l2 = new THREE.PointLight(0x88aaff, 25); scene.add(l2);
+
+// UI
+const spin = document.getElementById('spin');
+spin.onclick = () => { controls.autoRotate = !controls.autoRotate; spin.textContent = 'Auto-rotate: ' + (controls.autoRotate ? 'on' : 'off'); };
+document.getElementById('edges').onclick = e => { edgeLines.visible = !edgeLines.visible; e.target.textContent = edgeLines.visible ? 'Hide facet edges' : 'Show facet edges'; };
+const tints = [['clear', 0xffffff], ['blue', 0x6fb4ff], ['pink', 0xff8fc4], ['yellow', 0xffd84a]];
+let ti = 0;
+document.getElementById('tint').onclick = e => {
+  ti = (ti + 1) % tints.length;
+  material.attenuationColor.setHex(tints[ti][1]);
+  material.color.setHex(tints[ti][1]);
+  e.target.textContent = 'Colour: ' + tints[ti][0];
+};
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+renderer.setAnimationLoop(t => {
+  const s = t / 1000;
+  l1.position.set(Math.cos(s) * 3, 2.5, Math.sin(s) * 3);
+  l2.position.set(Math.cos(-s * 0.7) * 3, -1.5, Math.sin(-s * 0.7) * 3);
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
