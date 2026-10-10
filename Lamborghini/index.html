@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D Lamborghini Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0c11; overflow: hidden; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #ui { position: fixed; left: 16px; bottom: 16px; right: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { background: #ffffff18; color: #fff; border: 1px solid #ffffff40; border-radius: 8px; padding: 8px 14px; cursor: pointer; backdrop-filter: blur(6px); }
+  button:hover { background: #ffffff30; }
+  #hint { position: fixed; top: 14px; width: 100%; text-align: center; color: #ffffff99; font-size: 14px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="hint">Drag to rotate · scroll/pinch to zoom</div>
+<div id="ui">
+  <button id="spin">Auto-rotate: on</button>
+  <button id="doors">Doors: open</button>
+  <button id="paint">Colour: white</button>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0c11);
+scene.fog = new THREE.Fog(0x0a0c11, 12, 24);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.03).texture;
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(5.2, 1.9, 5.6);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.55, 0);
+controls.enableDamping = true;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.2;
+controls.minDistance = 3;
+controls.maxDistance = 12;
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+
+// lights + floor
+const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+sun.position.set(4, 7, 3);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: 1, far: 20 });
+scene.add(sun);
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(9, 64),
+  new THREE.MeshStandardMaterial({ color: 0x14171d, roughness: 0.35, metalness: 0.5 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// materials
+const paint = new THREE.MeshPhysicalMaterial({ color: 0xf2f2ee, metalness: 0.3, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.04 });
+const black = new THREE.MeshStandardMaterial({ color: 0x0c0c0e, roughness: 0.45, metalness: 0.3 });
+const glass = new THREE.MeshPhysicalMaterial({ color: 0x07080c, roughness: 0.05, metalness: 0.4, clearcoat: 1, envMapIntensity: 1.6 });
+const tire  = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.9 });
+const bronze = new THREE.MeshStandardMaterial({ color: 0x8a5a33, roughness: 0.28, metalness: 1 });
+const lightMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xdde8ff, emissiveIntensity: 2 });
+const tailMat  = new THREE.MeshStandardMaterial({ color: 0x300000, emissive: 0xff1010, emissiveIntensity: 2.5 });
+
+const car = new THREE.Group(); // front of the car points to +x
+scene.add(car);
+const add = (geo, mat, x = 0, y = 0, z = 0, parent = car) => {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m;
+};
+
+// Lofted body: stations are [x, topHeight, halfWidth]; smooth spline through them
+function loft(stations, yb, { fixedTop = null, grow = 0 } = {}) {
+  const curve = new THREE.CatmullRomCurve3(stations.map(s => new THREE.Vector3(...s)), false, 'centripetal');
+  const S = 80, R = 6, pos = [], idx = [];
+  for (let k = 0; k <= S; k++) {
+    const p = curve.getPoint(k / S);
+    const yt = fixedTop ?? p.y, w = p.z + grow, ym = yb + (yt - yb) * 0.55;
+    [[-w, yb], [-w, ym], [-w * 0.8, yt], [w * 0.8, yt], [w, ym], [w, yb]].forEach(([z, y]) => pos.push(p.x, y, z));
+  }
+  for (let k = 0; k < S; k++) for (let j = 0; j < R; j++) {
+    const a = k * R + j, b = k * R + (j + 1) % R, c = (k + 1) * R + j, d = (k + 1) * R + (j + 1) % R;
+    idx.push(a, b, c, b, d, c);
+  }
+  for (const [k, flip] of [[0, true], [S, false]]) { // end caps
+    const c = pos.length / 3, base = k * R;
+    let cy = 0; for (let j = 0; j < R; j++) cy += pos[(base + j) * 3 + 1] / R;
+    pos.push(pos[base * 3], cy, 0);
+    for (let j = 0; j < R; j++) {
+      const a = base + j, b = base + (j + 1) % R;
+      idx.push(...(flip ? [c, a, b] : [c, b, a]));
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+paint.side = black.side = glass.side = THREE.DoubleSide;
+
+const bodyStations = [
+  [-2.4, 0.62, 0.72], [-2.05, 0.88, 0.9], [-1.3, 0.97, 0.98], [-0.4, 0.92, 0.97],
+  [0.4, 0.78, 0.96], [1.1, 0.68, 0.95], [1.75, 0.55, 0.9], [2.4, 0.42, 0.7],
+];
+add(loft(bodyStations, 0.3), paint);                                       // white body
+add(loft(bodyStations, 0.12, { fixedTop: 0.36, grow: 0.015 }), black);     // black lower trim / splitter
+add(loft([[-0.95, 0.95, 0.72], [-0.55, 1.08, 0.7], [0.05, 1.14, 0.66], [0.6, 1.04, 0.66], [1.15, 0.74, 0.74]], 0.6), glass); // cabin
+
+// details: headlights, tail lights, side intakes
+for (const s of [-1, 1]) {
+  const hl = add(new THREE.BoxGeometry(0.4, 0.03, 0.09), lightMat, 2.02, 0.5, s * 0.5);
+  hl.rotation.z = -0.3; hl.rotation.y = -s * 0.12;
+  add(new THREE.BoxGeometry(0.7, 0.28, 0.05), black, -0.55, 0.62, s * 0.985);   // side intake
+  add(new THREE.BoxGeometry(0.5, 0.06, 0.04), black, 1.95, 0.22, s * 0.5);      // front intake slit
+}
+add(new THREE.BoxGeometry(0.04, 0.06, 1.15), tailMat, -2.36, 0.62, 0);
+add(new THREE.BoxGeometry(0.5, 0.05, 1.0), black, -2.3, 0.3, 0);               // diffuser
+
+// wheels (bronze, multi-spoke)
+function wheel() {
+  const g = new THREE.Group();
+  const t = add(new THREE.CylinderGeometry(0.37, 0.37, 0.3, 48), tire, 0, 0, 0, g);
+  const rim = add(new THREE.CylinderGeometry(0.265, 0.265, 0.31, 48), bronze, 0, 0, 0, g);
+  const dark = add(new THREE.CylinderGeometry(0.2, 0.2, 0.32, 32), black, 0, 0, 0, g);
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const sp = add(new THREE.BoxGeometry(0.035, 0.34, 0.2), bronze, Math.sin(a) * 0.14, 0, Math.cos(a) * 0.14, g);
+    sp.rotation.y = a;
+  }
+  add(new THREE.CylinderGeometry(0.045, 0.045, 0.34, 16), bronze, 0, 0, 0, g);
+  g.rotation.x = Math.PI / 2; // axle along z
+  return g;
+}
+for (const [x, z] of [[1.5, 0.9], [1.5, -0.9], [-1.4, 0.92], [-1.4, -0.92]]) {
+  const w = wheel(); w.position.set(x, 0.37, z); car.add(w);
+}
+
+// scissor doors: hinge at the front-top of each door, swing up
+const doorHinges = [];
+for (const s of [-1, 1]) {
+  const hinge = new THREE.Group();
+  hinge.position.set(0.95, 0.78, s * 0.93);
+  const door = add(new THREE.BoxGeometry(1.15, 0.48, 0.05), paint, -0.575, -0.24, 0, hinge);
+  add(new THREE.BoxGeometry(0.6, 0.2, 0.052), glass, -0.4, -0.08, 0, hinge);
+  car.add(hinge); doorHinges.push(hinge);
+}
+let doorOpen = 1, doorTarget = 1;
+
+// UI
+const spin = document.getElementById('spin');
+spin.onclick = () => { controls.autoRotate = !controls.autoRotate; spin.textContent = 'Auto-rotate: ' + (controls.autoRotate ? 'on' : 'off'); };
+const doorsBtn = document.getElementById('doors');
+doorsBtn.onclick = () => { doorTarget = 1 - doorTarget; doorsBtn.textContent = 'Doors: ' + (doorTarget ? 'open' : 'closed'); };
+const colours = [['white', 0xf2f2ee], ['orange', 0xff6a00], ['green', 0x2aa84a], ['yellow', 0xffd000], ['blue', 0x1648c8], ['black', 0x15151a]];
+let ci = 0;
+document.getElementById('paint').onclick = e => {
+  ci = (ci + 1) % colours.length; paint.color.setHex(colours[ci][1]);
+  e.target.textContent = 'Colour: ' + colours[ci][0];
+};
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+renderer.setAnimationLoop(() => {
+  doorOpen += (doorTarget - doorOpen) * 0.06;
+  doorHinges.forEach(h => { h.rotation.z = -doorOpen * 0.95; });
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
