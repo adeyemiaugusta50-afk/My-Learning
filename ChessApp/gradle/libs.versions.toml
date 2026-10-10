@@ -1,0 +1,29 @@
+# Versions verified against official Android/Gradle documentation on 2026-10-10:
+#   AGP 9.4.0 needs Gradle >= 9.6.0, JDK 17, SDK Build-Tools 36.0.0 (developer.android.com/build/releases/agp-9-4-0-release-notes)
+#   Compose BOM 2026.09.00 (developer.android.com/develop/ui/compose/bom/bom-mapping)
+#   activity 1.13.0 / lifecycle 2.11.0 (developer.android.com/jetpack/androidx/releases)
+#   Play target API: API 36+ for new apps and updates from 2026-08-31 (developer.android.com/google/play/requirements/target-sdk)
+# Keep `kotlin` in sync with the classpath entry in the root build.gradle.kts.
+[versions]
+agp = "9.4.0"
+kotlin = "2.4.21"
+composeBom = "2026.09.00"
+activityCompose = "1.13.0"
+lifecycle = "2.11.0"
+
+[libraries]
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { module = "androidx.compose.ui:ui" }
+androidx-compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
+androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
+androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
+androidx-compose-foundation = { module = "androidx.compose.foundation:foundation" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

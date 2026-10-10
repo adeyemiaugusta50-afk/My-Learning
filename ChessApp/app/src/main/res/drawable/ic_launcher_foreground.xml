@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original, simple pawn silhouette (head, collar, body, base) drawn for this project. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#F5F1E6" android:pathData="M54,26m-9,0a9,9 0,1 1,18 0a9,9 0,1 1,-18 0" />
+    <path android:fillColor="#F5F1E6" android:pathData="M44,38h20v5h-20z" />
+    <path android:fillColor="#F5F1E6" android:pathData="M47,43h14c0,10 4,16 8,24h-30c4,-8 8,-14 8,-24z" />
+    <path android:fillColor="#F5F1E6" android:pathData="M38,67h32v6h-32zM35,73h38v6h-38z" />
+</vector>
