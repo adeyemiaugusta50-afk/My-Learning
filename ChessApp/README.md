@@ -45,7 +45,7 @@ Separation of concerns: **chess logic** (`Position`, `ChessGame`) → **game/ses
 | Gradle | 9.8.1 | downloaded automatically by the wrapper (`./gradlew`); AGP 9.4 needs ≥ 9.6.0 |
 
 Versions in `gradle/libs.versions.toml`, chosen from Google's official documentation on 2026-10-10:
-AGP **9.4.0**, Kotlin **2.4.21**, Compose BOM **2026.09.00**, activity-compose **1.13.0**, lifecycle **2.11.0**.
+AGP **9.4.0**, Kotlin **2.2.10** (AGP 9's bundled default; Compose libraries require Kotlin 2.2 or newer), Compose BOM **2026.09.00**, activity-compose **1.13.0**, lifecycle **2.11.0**.
 `minSdk` is 26 (Android 8.0). The app requests **no permissions**.
 
 **Google Play:** from 31 August 2026 new apps and updates must target Android 16 (API 36) or higher
@@ -150,17 +150,39 @@ Maven repository / SDK downloads** (blocked), so AGP, AndroidX and Compose-for-A
 
 | Check | Result |
 |---|---|
-| `./gradlew :chess-core:test -Pchess.coreOnly=true` (Gradle 9.8.1, Kotlin 2.4.21, JUnit 5) | **Ran: 115 tests, 0 failures** |
+| `./gradlew :chess-core:test -Pchess.coreOnly=true` (Gradle 9.8.1, Kotlin 2.2.10, JUnit 5) | **Ran: 115 tests, 0 failures** |
 | Perft node counts vs published values | **Ran: all match** |
 | Mutation check of the tests | **Ran: all 4 mutations caught** |
 | Type-check of **all** app Kotlin (ViewModel, storage, sound, activity, every Compose screen) | **Ran, compiles cleanly** - against the real `chess-core`, real Compose Multiplatform 1.5.12 (an *older* Compose than the 1.12.x the Android build will use, so newer-only APIs would show up as errors but API changes since 1.5 are not checked) and small hand-written stand-ins for Android classes. It caught and fixed one real bug (a missing import). |
 | Headless rendering of the real screens (screenshots above) | **Ran** (portrait, rotated, 320 dp phone, landscape, tablet, promotion & game-over dialogs, home/setup/settings) |
-| `./gradlew :app:assembleDebug` | **Failed here, as expected:** `Plugin com.android.application:9.4.0 was not found` (Google's Maven repo is unreachable). **Never built into an APK.** |
+| First real build on Windows (Android Studio, Gradle 9.8.1) | **Failed**: `NoClassDefFoundError: com/android/build/gradle/api/BaseVariant` when applying `com.android.application`. Cause and fix: see [Troubleshooting](#troubleshooting). The fix is verified only in a reproduction; **not yet confirmed on a full Android build.** |
+| `./gradlew :app:assembleDebug` (in the original authoring sandbox) | **Failed there, as expected:** `Plugin com.android.application:9.4.0 was not found` (Google's Maven repo is unreachable). **Never built into an APK.** |
 | Instrumented tests, lint, running on a device/emulator, TalkBack, process-death restore, the exact Android Compose/AGP versions, sound playback, APK size/R8 | **Not run.** Run the commands above locally. |
 
-Versions (AGP 9.4.0, Gradle 9.8.1, Kotlin 2.4.21, Compose BOM 2026.09.00, activity-compose 1.13.0, lifecycle 2.11.0) were read
+Versions (AGP 9.4.0, Gradle 9.8.1, Kotlin 2.2.10, Compose BOM 2026.09.00, activity-compose 1.13.0, lifecycle 2.11.0) were read
 from official Android/Gradle pages and Maven metadata, but the combination has **not** been built together. If sync
 reports a version conflict, adjust `gradle/libs.versions.toml` (Android Studio's *Upgrade Assistant* helps with AGP).
+
+## Troubleshooting
+
+### `NoClassDefFoundError: com/android/build/gradle/api/BaseVariant` while applying `com.android.application`
+**Cause (reproduced with real Gradle 9.8.1 and the real Kotlin Gradle plugin):** an earlier version of this project put
+the Kotlin Gradle plugin on the *root* build's classpath (to force Kotlin 2.4.21) while the Android Gradle Plugin was loaded
+separately inside `:app`. AGP 9's built-in Kotlin support instantiates a Kotlin class that refers to
+`BaseVariant`, an AGP class; plugin class loaders are hierarchical, so Kotlin (in the parent loader) could not see AGP
+(in the child loader).
+**Fix:** every plugin is now declared once in the root `build.gradle.kts` with `apply false` (the standard Android Studio
+layout) so they share one class loader, and the Kotlin version is AGP 9's own default, **2.2.10**, so no override is needed.
+After updating, run `.\gradlew.bat --stop` (Windows) / `./gradlew --stop` so the old daemon's class loaders are dropped, and
+delete the `.gradle` and `build` folders in the project before syncing again.
+
+### If sync reports a different version problem
+Versions are in `gradle/libs.versions.toml` and were read from official documentation, but the full Android combination has
+only been built by you, not by the author. Send the first error and the output of `./gradlew :app:dependencies --configuration debugRuntimeClasspath`.
+
+### Engine-only build (no Android SDK)
+`-Pchess.coreOnly=true` makes `settings.gradle.kts` skip `:app` and use `build.coreonly.gradle.kts` as the root script
+(the same as `build.gradle.kts` without the Android plugin), so only `chess-core` is configured.
 
 ## Documentation
 

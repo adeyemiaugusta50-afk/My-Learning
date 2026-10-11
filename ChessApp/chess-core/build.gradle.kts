@@ -1,6 +1,5 @@
 plugins {
-    // Kotlin Gradle plugin comes from the root buildscript classpath, so no version here.
-    id("org.jetbrains.kotlin.jvm")
+    alias(libs.plugins.kotlin.jvm)
 }
 
 kotlin {

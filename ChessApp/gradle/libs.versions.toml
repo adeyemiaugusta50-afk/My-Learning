@@ -3,10 +3,11 @@
 #   Compose BOM 2026.09.00 (developer.android.com/develop/ui/compose/bom/bom-mapping)
 #   activity 1.13.0 / lifecycle 2.11.0 (developer.android.com/jetpack/androidx/releases)
 #   Play target API: API 36+ for new apps and updates from 2026-08-31 (developer.android.com/google/play/requirements/target-sdk)
-# Keep `kotlin` in sync with the classpath entry in the root build.gradle.kts.
+# Kotlin 2.2.10 is the Kotlin Gradle plugin version that AGP 9 bundles by default (AGP 9 release notes). Compose libraries
+# require kotlinc 2.2 or newer (Compose UI release notes). The Compose compiler plugin version must equal the Kotlin version.
 [versions]
 agp = "9.4.0"
-kotlin = "2.4.21"
+kotlin = "2.2.10"
 composeBom = "2026.09.00"
 activityCompose = "1.13.0"
 lifecycle = "2.11.0"
@@ -26,4 +27,5 @@ androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-ru
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
